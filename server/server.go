@@ -111,17 +111,16 @@ func (node *TCPServerNode) startDispatch() {
 
 func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
 	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
+	info, ok := node.clientInfoMap[raddr]
 	defer func() {
 		if e := recover(); e != nil {
 			fmt.Printf("写入%v错误：%v\n", msg, e)
 			node.notifyClose(msg.RemoteIP.String(), msg.RemotePort, proto.ACTION_CLOSE_WRITE)
-			info, ok := node.clientInfoMap[raddr]
-			if ok {
+			if info != nil && info.readCancel != nil {
 				info.writeCancel()
 			}
 		}
 	}()
-	info, ok := node.clientInfoMap[raddr]
 	if proto.IsCloseMsg(msg) {
 		if !ok {
 			return
@@ -170,7 +169,9 @@ func (node *TCPServerNode) collectFromClient(clientInfo *tcpClientInfo) {
 			fmt.Printf("读取%v错误：%v\n", clientNode, e)
 		}
 		node.notifyClose(clientNode.RemoteHost, clientNode.RemotePort, proto.ACTION_CLOSE_READ)
-		clientInfo.readCancel()
+		if clientInfo != nil && clientInfo.readCancel != nil {
+			clientInfo.readCancel()
+		}
 	}()
 	for {
 		msg, err := clientNode.Read()

@@ -94,12 +94,12 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 	defer func() {
 		if e := recover(); e != nil {
 			fmt.Printf("推送消息错误：%v\n", e)
-			if info != nil {
-				info.writeCancel()
-			}
 			msg.Data = []byte{}
 			msg.Action = proto.ACTION_CLOSE_WRITE
 			node.Write(msg)
+			if info != nil && info.writeCancel != nil {
+				info.writeCancel()
+			}
 		}
 	}()
 	if proto.IsCloseMsg(msg) {
@@ -150,14 +150,24 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 	node.lock.Lock()
 	defer func() {
 		node.lock.Unlock()
+	}()
+	info, err := node.findClientNode(msg)
+	defer func() {
 		if e := recover(); e != nil {
 			fmt.Printf("连接本地服务失败：%v\n", e)
 			msg.Data = []byte{}
 			msg.Action = proto.ACTION_CLOSE_ALL
 			node.Write(msg)
+			if info != nil {
+				if info.writeCancel != nil {
+					info.writeCancel()
+				}
+				if info.readCancel != nil {
+					info.readCancel()
+				}
+			}
 		}
 	}()
-	info, err := node.findClientNode(msg)
 	if err != nil {
 		// 找不到时创建一个新的
 		switch msg.Protocol {
