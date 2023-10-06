@@ -97,7 +97,6 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 			if info != nil {
 				info.writeCancel()
 			}
-			// TODO 通知远端关闭
 			msg.Data = []byte{}
 			msg.Action = proto.ACTION_CLOSE_WRITE
 			node.Write(msg)

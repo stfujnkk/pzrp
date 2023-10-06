@@ -37,17 +37,19 @@ func (node *TCPClientNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return msg.Data, nil
 }
 
-type clientInfo struct {
+type tcpClientInfo struct {
+	node        *TCPClientNode
 	readCancel  context.CancelFunc
 	writeCancel context.CancelFunc
 	readCtx     context.Context
 	writeCtx    context.Context
 }
 
-func newClientInfo(ctx context.Context) *clientInfo {
-	info := &clientInfo{}
+func newClientInfo(con *net.TCPConn, ctx context.Context) *tcpClientInfo {
+	info := &tcpClientInfo{}
 	info.readCtx, info.readCancel = context.WithCancel(ctx)
 	info.writeCtx, info.writeCancel = context.WithCancel(ctx)
+	info.node = NewTCPClientNode(con, info.readCtx, info.writeCtx)
 	return info
 }
 
@@ -56,8 +58,7 @@ type TCPServerNode struct {
 	cancel        context.CancelFunc
 	listener      *net.TCPListener
 	lock          *sync.Mutex
-	clients       map[string]*TCPClientNode
-	clientInfoMap map[string]*clientInfo
+	clientInfoMap map[string]*tcpClientInfo
 	inch          chan proto.Msg
 	ouch          chan proto.Msg
 	closeOnce     *sync.Once
@@ -69,8 +70,7 @@ func NewTCPServerNode(listener *net.TCPListener, ctx context.Context) *TCPServer
 	node := &TCPServerNode{
 		listener:      listener,
 		lock:          new(sync.Mutex),
-		clients:       map[string]*TCPClientNode{},
-		clientInfoMap: map[string]*clientInfo{},
+		clientInfoMap: map[string]*tcpClientInfo{},
 		inch:          make(chan proto.Msg),
 		ouch:          make(chan proto.Msg),
 		closeOnce:     &sync.Once{},
@@ -110,15 +110,19 @@ func (node *TCPServerNode) startDispatch() {
 }
 
 func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
+	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
 	defer func() {
 		if e := recover(); e != nil {
 			fmt.Printf("写入%v错误：%v\n", msg, e)
 			node.notifyClose(msg.RemoteIP.String(), msg.RemotePort, proto.ACTION_CLOSE_WRITE)
+			info, ok := node.clientInfoMap[raddr]
+			if ok {
+				info.writeCancel()
+			}
 		}
 	}()
-	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
+	info, ok := node.clientInfoMap[raddr]
 	if proto.IsCloseMsg(msg) {
-		info, ok := node.clientInfoMap[raddr]
 		if !ok {
 			return
 		}
@@ -130,11 +134,10 @@ func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
 		}
 		return
 	} else {
-		client, ok := node.clients[raddr]
 		if !ok {
 			panic(fmt.Sprintf("找不到 %s", raddr))
 		}
-		err := client.Write(msg)
+		err := info.node.Write(msg)
 		if err != nil {
 			panic(err)
 		}
@@ -148,10 +151,7 @@ func (node *TCPServerNode) notifyClose(ip string, port uint16, action uint8) {
 			node.cancel()
 		}
 	}()
-	// raddr := fmt.Sprintf("%s:%d", ip, port)
-	// if (action & proto.ACTION_CLOSE_WRITE) != 0 {
-	// 	delete(node.clients, raddr)
-	// }
+
 	node.ouch <- proto.Msg{
 		RemoteIP:   net.ParseIP(ip),
 		RemotePort: port,
@@ -162,14 +162,15 @@ func (node *TCPServerNode) notifyClose(ip string, port uint16, action uint8) {
 	}
 }
 
-func (node *TCPServerNode) collectFromClient(clientNode *TCPClientNode) {
+func (node *TCPServerNode) collectFromClient(clientInfo *tcpClientInfo) {
+	clientNode := clientInfo.node
 	defer func() {
 		e := recover()
 		if e != nil {
 			fmt.Printf("读取%v错误：%v\n", clientNode, e)
 		}
 		node.notifyClose(clientNode.RemoteHost, clientNode.RemotePort, proto.ACTION_CLOSE_READ)
-		// TODO 关闭clientNode的read
+		clientInfo.readCancel()
 	}()
 	for {
 		msg, err := clientNode.Read()
@@ -187,20 +188,19 @@ func (node *TCPServerNode) startAccept() {
 			panic(err)
 		}
 		fmt.Printf("新连接%v\n", con)
-		clientNode := node.registerConnection(con)
-		go node.collectFromClient(clientNode)
+		info := node.registerConnection(con)
+		go node.collectFromClient(info)
 	}
 }
 
-func (node *TCPServerNode) registerConnection(con *net.TCPConn) *TCPClientNode {
+func (node *TCPServerNode) registerConnection(con *net.TCPConn) *tcpClientInfo {
 	node.lock.Lock()
 	defer func() {
 		node.lock.Unlock()
 	}()
-	info := newClientInfo(node.ctx)
-	clientNode := NewTCPClientNode(con, info.readCtx, info.writeCtx)
+	info := newClientInfo(con, node.ctx)
+	clientNode := info.node
 	raddr := fmt.Sprintf("%s:%d", clientNode.RemoteHost, clientNode.RemotePort)
-	node.clients[raddr] = clientNode
 	node.clientInfoMap[raddr] = info
 	go func() {
 		node.ouch <- proto.Msg{
@@ -216,21 +216,20 @@ func (node *TCPServerNode) registerConnection(con *net.TCPConn) *TCPClientNode {
 		defer func() {
 			node.lock.Unlock()
 		}()
-		delete(node.clients, raddr)
 		delete(node.clientInfoMap, raddr)
 	}()
-	return clientNode
+	return info
 }
 
-func (node *TCPServerNode) Read() (proto.Msg, any) {
+func (node *TCPServerNode) Read() (proto.Msg, error) {
 	msg, ok := <-node.ouch
-	var err any = nil
+	var err error = nil
 	if !ok {
 		err = pkgErr.ErrClosed
 	}
 	return msg, err
 }
-func (node *TCPServerNode) Write(msg proto.Msg) (err any) {
+func (node *TCPServerNode) Write(msg proto.Msg) (err error) {
 	defer (func() {
 		if e := recover(); e != nil {
 			err = pkgErr.ErrClosed

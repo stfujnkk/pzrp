@@ -2,11 +2,11 @@ package tcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
+	"pzrp/pkg/utils"
 	"runtime"
 	"sync"
 	"time"
@@ -31,8 +31,6 @@ func NewTCPNode(conn *net.TCPConn, readCtx, writeCtx context.Context, isWait boo
 		ouch:       make(chan proto.Msg),
 		done:       make(chan struct{}),
 		closed:     0,
-		readError:  nil,
-		writeError: nil,
 		lock:       new(sync.Mutex),
 		conn:       conn,
 		Pack:       nil,
@@ -43,10 +41,8 @@ func NewTCPNode(conn *net.TCPConn, readCtx, writeCtx context.Context, isWait boo
 	node.SetWriteCtx(writeCtx)
 	result := &TCPNode{node}
 	runtime.SetFinalizer(result, func(n *TCPNode) {
-		fmt.Println("gc")
-		// 自动关闭资源
-		n.closeRead(errors.New("gc"))
-		n.closeWrite(errors.New("gc"))
+		n.tcpNode.readCancel(pkgErr.ErrFreeByGC)
+		n.tcpNode.writeCancel(pkgErr.ErrFreeByGC)
 	})
 	return result
 }
@@ -59,16 +55,14 @@ type tcpNode struct {
 	ouch           chan proto.Msg
 	done           chan struct{}
 	closed         uint8
-	readError      any
-	writeError     any
 	lock           *sync.Mutex
 	conn           *net.TCPConn
 	Pack           func(msg *proto.Msg, data []byte) (int, error)
 	UnPack         func(msg proto.Msg) ([]byte, error)
 	readCtx        context.Context
 	writeCtx       context.Context
-	readCancel     context.CancelFunc
-	writeCancel    context.CancelFunc
+	readCancel     context.CancelCauseFunc
+	writeCancel    context.CancelCauseFunc
 	isWait         bool
 	closeWaitTimer *time.Timer
 }
@@ -76,11 +70,11 @@ type tcpNode struct {
 func (node *tcpNode) Run() {
 	go func() {
 		<-node.readCtx.Done()
-		node.closeRead(pkgErr.ErrCanceled)
+		node.closeRead()
 	}()
 	go func() {
 		<-node.writeCtx.Done()
-		node.closeWrite(pkgErr.ErrCanceled)
+		node.closeWrite()
 	}()
 	go node.startRead()
 	go node.startWrite()
@@ -88,12 +82,12 @@ func (node *tcpNode) Run() {
 	fmt.Printf("关闭节点%v\n", *node)
 }
 
-func (node *tcpNode) Write(msg proto.Msg) (err any) {
+func (node *tcpNode) Write(msg proto.Msg) (err error) {
 	defer (func() {
 		if e := recover(); e != nil {
-			err = pkgErr.ErrClosed
-			if node.writeError != nil {
-				err = node.writeError
+			err = node.writeCtx.Err()
+			if err == nil {
+				err = utils.NewErr(e)
 			}
 		}
 	})()
@@ -104,28 +98,27 @@ func (node *tcpNode) Write(msg proto.Msg) (err any) {
 	return nil
 }
 
-func (node *tcpNode) Read() (proto.Msg, any) {
+func (node *tcpNode) Read() (proto.Msg, error) {
 	msg, ok := <-node.ouch
-	var err any = nil
+	var err error = nil
 	if !ok {
-		err = pkgErr.ErrClosed
-		if node.readError != nil {
-			err = node.readError
+		err = node.readCtx.Err()
+		if err == nil {
+			err = pkgErr.ErrClosed
 		}
 	}
 	return msg, err
 }
 
 func (node *tcpNode) SetReadCtx(ctx context.Context) {
-	node.readCtx, node.readCancel = context.WithCancel(ctx)
+	node.readCtx, node.readCancel = context.WithCancelCause(ctx)
 	if !node.isWait {
 		node.writeCtx, node.writeCancel = node.readCtx, node.readCancel
 	}
 }
 
 func (node *tcpNode) SetWriteCtx(ctx context.Context) {
-	// TODO use context.WithCancelCause()
-	node.writeCtx, node.writeCancel = context.WithCancel(ctx)
+	node.writeCtx, node.writeCancel = context.WithCancelCause(ctx)
 	if !node.isWait {
 		node.readCtx, node.readCancel = node.writeCtx, node.writeCancel
 	}
@@ -139,7 +132,11 @@ func (node *tcpNode) Done() <-chan struct{} {
 func (node *tcpNode) startRead() {
 	defer (func() {
 		e := recover()
-		node.closeRead(e)
+		if e != nil {
+			node.readCancel(utils.NewErr(e))
+		} else {
+			node.readCancel(pkgErr.ErrClosed)
+		}
 	})()
 	buf := make([]byte, 0)
 	msg := proto.Msg{}
@@ -164,17 +161,22 @@ func (node *tcpNode) startRead() {
 		}
 	}
 }
+
 func (node *tcpNode) startWrite() {
 	defer (func() {
 		e := recover()
-		node.closeWrite(e)
+		if e != nil {
+			node.writeCancel(utils.NewErr(e))
+		} else {
+			node.writeCancel(pkgErr.ErrClosed)
+		}
 	})()
 	for msg := range node.inch {
 		data, err := node.UnPack(msg)
 		if err != nil {
 			panic(err)
 		}
-		
+
 		for len(data) > 0 {
 			n, err := node.conn.Write(data)
 			if err != nil {
@@ -192,12 +194,12 @@ func (node *tcpNode) resetCloseWaitTimer() {
 	}
 	if !isClosing {
 		node.closeWaitTimer = time.AfterFunc(60*time.Second, func() {
-			node.closeWrite(errors.New("close_wait timeout"))
+			node.writeCancel(pkgErr.ErrCloseWaitTimeOut)
 		})
 	}
 }
 
-func (node *tcpNode) closeRead(reason any) {
+func (node *tcpNode) closeRead() {
 	node.lock.Lock()
 	defer (func() {
 		node.lock.Unlock()
@@ -207,10 +209,6 @@ func (node *tcpNode) closeRead(reason any) {
 		return
 	}
 	node.closed |= proto.ACTION_CLOSE_READ
-	if node.readError == nil && reason != nil {
-		node.readError = reason
-	}
-	node.readCancel() // 释放goroutine
 	close(node.ouch)
 	if node.isWait {
 		node.resetCloseWaitTimer()
@@ -222,7 +220,8 @@ func (node *tcpNode) closeRead(reason any) {
 		node.conn.CloseRead()
 	}
 }
-func (node *tcpNode) closeWrite(reason any) {
+
+func (node *tcpNode) closeWrite() {
 	node.lock.Lock()
 	defer (func() {
 		node.lock.Unlock()
@@ -232,10 +231,6 @@ func (node *tcpNode) closeWrite(reason any) {
 		return
 	}
 	node.closed |= proto.ACTION_CLOSE_WRITE
-	if node.writeError == nil && reason != nil {
-		node.writeError = reason
-	}
-	node.writeCancel() // 释放goroutine
 	close(node.inch)
 	if node.closed == proto.ACTION_CLOSE_ALL {
 		close(node.done)

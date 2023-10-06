@@ -20,10 +20,10 @@ const (
 )
 
 type Node interface {
-	Read() (Msg, any)
-	Write(Msg) any
-	SetReadCtx(context.Context)  // 通知节点关闭Read
-	SetWriteCtx(context.Context) // 通知节点关闭Write
+	Read() (Msg, error)
+	Write(Msg) error
+	SetReadCtx(context.Context)
+	SetWriteCtx(context.Context)
 	Run()
 }
 
@@ -39,7 +39,7 @@ type Msg struct {
 type Packet struct {
 	Length uint16
 	PacketHead
-	Data   []byte
+	Data []byte
 }
 
 type PacketHead struct {
