@@ -192,7 +192,7 @@ func (node *tcpNode) resetCloseWaitTimer() {
 	}
 	if !isClosing {
 		node.closeWaitTimer = time.AfterFunc(60*time.Second, func() {
-			node.closeWrite(errors.New("close_wait time out"))
+			node.closeWrite(errors.New("close_wait timeout"))
 		})
 	}
 }
