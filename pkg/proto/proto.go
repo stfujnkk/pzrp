@@ -7,9 +7,15 @@ import (
 
 // 协议
 const (
+	PROTO_NUL = uint8(iota)
 	PROTO_TCP = uint8(iota)
 	PROTO_UDP = uint8(iota)
 )
+
+var ProtoNameMap = map[string]uint8{
+	"tcp": PROTO_TCP,
+	"udp": PROTO_UDP,
+}
 
 // 指令
 const (
@@ -17,6 +23,7 @@ const (
 	ACTION_CLOSE_READ  = uint8(iota)
 	ACTION_CLOSE_WRITE = uint8(iota)
 	ACTION_CLOSE_ALL   = ACTION_CLOSE_READ | ACTION_CLOSE_WRITE
+	ACTION_SET_CONFIG  = uint8(iota)
 )
 
 type Node interface {

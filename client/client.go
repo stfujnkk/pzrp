@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
 	"sync"
@@ -25,6 +27,7 @@ type TunnelClientNode struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	lock           *sync.Mutex
+	conf           *config.ClientConf
 }
 
 func (node *TunnelClientNode) overridePack(msg *proto.Msg, data []byte) (int, error) {
@@ -40,7 +43,7 @@ func (node *TunnelClientNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return data, err
 }
 
-func NewTunnelClientNode(conn *net.TCPConn, ctx context.Context) *TunnelClientNode {
+func NewTunnelClientNode(conn *net.TCPConn, ctx context.Context, conf *config.ClientConf) *TunnelClientNode {
 	_ctx, _cancel := context.WithCancel(ctx)
 	node := &TunnelClientNode{
 		TCPNode:        tcp.NewTCPNode(conn, _ctx, _ctx, false),
@@ -49,6 +52,7 @@ func NewTunnelClientNode(conn *net.TCPConn, ctx context.Context) *TunnelClientNo
 		serviceMapping: map[uint8]map[uint16]uint16{},
 		clients:        map[uint8]map[uint16]map[string]*clientNodeInfo{},
 		lock:           new(sync.Mutex),
+		conf:           conf,
 	}
 	node.Pack = node.overridePack
 	node.UnPack = node.overrideUnPack
@@ -61,6 +65,10 @@ func (node *TunnelClientNode) AddServer(protocol uint8, rPort uint16, lPort uint
 		services = map[uint16]uint16{}
 		node.serviceMapping[protocol] = services
 	}
+	_, ok = services[rPort]
+	if ok {
+		panic(fmt.Sprintf("重复分配端口:%d", rPort))
+	}
 	services[rPort] = lPort
 }
 
@@ -72,6 +80,30 @@ func (node *TunnelClientNode) Run() {
 	node.TCPNode.Run()
 }
 
+func (node *TunnelClientNode) pushConfig() {
+	config.RegisterService(node.conf, node.AddServer)
+	data, err := json.Marshal(node.conf)
+	if err != nil {
+		panic(err)
+	}
+	size := len(data)
+	for i := 0; ; i += 0xffff {
+		j := min(size, i+0xffff)
+		msg := proto.Msg{
+			Action: proto.ACTION_SET_CONFIG,
+			Data:   data[i:j],
+		}
+		node.TCPNode.Write(msg)
+		if j == size {
+			if len(msg.Data) == 0xffff {
+				msg.Data = []byte{}
+				node.TCPNode.Write(msg)
+			}
+			break
+		}
+	}
+}
+
 func (node *TunnelClientNode) startDispatch() {
 	defer func() {
 		e := recover()
@@ -80,6 +112,7 @@ func (node *TunnelClientNode) startDispatch() {
 		}
 		node.cancel()
 	}()
+	node.pushConfig()
 	for {
 		msg, err := node.Read()
 		if err != nil {
@@ -318,4 +351,18 @@ func (node *ProxyTCPNode) overridePack(msg *proto.Msg, data []byte) (int, error)
 
 func (node *ProxyTCPNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return msg.Data, nil
+}
+
+func Run() {
+	conf, err := config.LoadClientConfig()
+	if err != nil {
+		panic(err)
+	}
+	con, err := net.Dial("tcp", fmt.Sprintf("%s:%d", conf.ServerAddr, conf.ServerPort))
+	if err != nil {
+		panic(err)
+	}
+	ctx := context.Background()
+	tun := NewTunnelClientNode(con.(*net.TCPConn), ctx, conf)
+	tun.Run()
 }

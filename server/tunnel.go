@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
 )
@@ -37,11 +39,24 @@ func (node *TunnelNode) AddServer(protocol uint8, port uint16) {
 	services[port] = nil
 }
 
-func (node *TunnelNode) Run() {
-	defer func() {
-		node.cancel()
-		// fmt.Println("关闭")
-	}()
+func (node *TunnelNode) initServer() {
+	data := make([]byte, 0)
+	for {
+		msg, err := node.Read()
+		if err != nil {
+			panic(err)
+		}
+		data = append(data, msg.Data...)
+		if len(msg.Data) < 0xffff {
+			break
+		}
+	}
+	conf := config.ClientConf{}
+	json.Unmarshal(data, &conf)
+	addServer := func(protocol uint8, port uint16, _ uint16) {
+		node.AddServer(protocol, port)
+	}
+	config.RegisterService(&conf, addServer)
 	for k, v := range node.services {
 		switch k {
 		case proto.PROTO_TCP:
@@ -55,6 +70,13 @@ func (node *TunnelNode) Run() {
 			panic(fmt.Errorf("unknown protocol:%v", k))
 		}
 	}
+}
+
+func (node *TunnelNode) Run() {
+	defer func() {
+		node.cancel()
+	}()
+	go node.initServer()
 	node.TCPNode.Run()
 }
 

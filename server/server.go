@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
+	"pzrp/pkg/config"
 	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
@@ -260,3 +263,33 @@ func (node *TCPServerNode) closeServer() {
 }
 
 var _ proto.Node = &TCPServerNode{}
+
+func Run() {
+	conf, err := config.LoadServerConfig()
+	if err != nil {
+		panic(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan)
+	go func() {
+		select {
+		case sig := <-sigChan:
+			fmt.Printf("用户强制退出：%v\n", sig)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort))
+	if err != nil {
+		panic(err)
+	}
+	for {
+		con, err := lis.Accept()
+		if err != nil {
+			panic(err)
+		}
+		tun := NewTunnelNode(con.(*net.TCPConn), ctx)
+		go tun.Run()
+	}
+}
