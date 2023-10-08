@@ -265,11 +265,10 @@ func (node *TCPServerNode) closeServer() {
 var _ proto.Node = &TCPServerNode{}
 
 func Run() {
-	conf, err := config.LoadServerConfig()
-	if err != nil {
-		panic(err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+	}()
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan)
 	go func() {
@@ -280,6 +279,12 @@ func Run() {
 		case <-ctx.Done():
 		}
 	}()
+
+	conf, err := config.LoadServerConfig()
+	if err != nil {
+		panic(err)
+	}
+
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort))
 	if err != nil {
 		panic(err)

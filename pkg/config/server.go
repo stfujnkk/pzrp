@@ -7,7 +7,7 @@ import (
 
 type ServerConf struct {
 	BindAddr string `json:"bind_addr"`
-	BindPort uint8  `json:"bind_port"`
+	BindPort int    `json:"bind_port"`
 }
 
 func LoadServerConfig() (*ServerConf, error) {

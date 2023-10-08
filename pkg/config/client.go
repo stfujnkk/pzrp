@@ -17,8 +17,8 @@ type ClientConf struct {
 
 type ClientServiceConf struct {
 	Type       string `json:"type"`
-	LocalIP    string `json:"server_addr"`
-	LocalPort  string `json:"local_ip"`
+	LocalIP    string `json:"local_ip"`
+	LocalPort  string `json:"local_port"`
 	RemotePort string `json:"remote_port"`
 }
 

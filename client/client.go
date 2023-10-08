@@ -90,8 +90,9 @@ func (node *TunnelClientNode) pushConfig() {
 	for i := 0; ; i += 0xffff {
 		j := min(size, i+0xffff)
 		msg := proto.Msg{
-			Action: proto.ACTION_SET_CONFIG,
-			Data:   data[i:j],
+			RemoteIP: net.ParseIP("0.0.0.0"),
+			Action:   proto.ACTION_SET_CONFIG,
+			Data:     data[i:j],
 		}
 		node.TCPNode.Write(msg)
 		if j == size {

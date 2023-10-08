@@ -40,6 +40,12 @@ func (node *TunnelNode) AddServer(protocol uint8, port uint16) {
 }
 
 func (node *TunnelNode) initServer() {
+	defer func() {
+		if e := recover(); e != nil {
+			fmt.Println(e)
+			node.cancel()
+		}
+	}()
 	data := make([]byte, 0)
 	for {
 		msg, err := node.Read()
@@ -74,6 +80,10 @@ func (node *TunnelNode) initServer() {
 
 func (node *TunnelNode) Run() {
 	defer func() {
+		e := recover()
+		if e != nil {
+			fmt.Println(e)
+		}
 		node.cancel()
 	}()
 	go node.initServer()
