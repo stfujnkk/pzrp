@@ -18,7 +18,7 @@ type TunnelNode struct {
 	cancel   context.CancelFunc
 }
 
-func NewTunnelNode(conn *net.TCPConn, ctx context.Context) *TunnelNode {
+func NewTunnelNode(conn tcp.DuplexConnection, ctx context.Context) *TunnelNode {
 	_ctx, _cancel := context.WithCancel(ctx)
 	node := &TunnelNode{
 		TCPNode:  tcp.NewTCPNode(conn, _ctx, _ctx, false),

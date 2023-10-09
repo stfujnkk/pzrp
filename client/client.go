@@ -2,11 +2,14 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
@@ -45,7 +48,7 @@ func (node *TunnelClientNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return data, err
 }
 
-func NewTunnelClientNode(conn *net.TCPConn, ctx context.Context, conf *config.ClientConf) *TunnelClientNode {
+func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *config.ClientConf) *TunnelClientNode {
 	_ctx, _cancel := context.WithCancel(ctx)
 	node := &TunnelClientNode{
 		TCPNode:        tcp.NewTCPNode(conn, _ctx, _ctx, false),
@@ -329,7 +332,7 @@ type ProxyTCPNode struct {
 }
 
 func NewProxyTCPNode(
-	conn *net.TCPConn,
+	conn tcp.DuplexConnection,
 	readCtx, writeCtx context.Context,
 	ServerPort uint16,
 	RemoteIP net.IP,
@@ -360,12 +363,46 @@ func (node *ProxyTCPNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return msg.Data, nil
 }
 
-func Run(ctx context.Context, conf *config.ClientConf) {
-	ctx = utils.SetLogger(ctx, slog.Default())
-	con, err := net.Dial("tcp", fmt.Sprintf("%s:%d", conf.ServerAddr, conf.ServerPort))
+func getConnection(conf *config.ClientConf) tcp.DuplexConnection {
+	addr := fmt.Sprintf("%s:%d", conf.ServerAddr, conf.ServerPort)
+	if conf.CertFile != "" && conf.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(conf.CertFile, conf.KeyFile)
+		if err != nil {
+			panic(err)
+		}
+		var certPool *x509.CertPool = nil
+		if conf.CaCert != "" {
+			certBytes, err := os.ReadFile(conf.CaCert)
+			if err != nil {
+				panic(err)
+			}
+			certPool = x509.NewCertPool()
+			ok := certPool.AppendCertsFromPEM(certBytes)
+			if !ok {
+				panic(err)
+			}
+		}
+		tlsConf := &tls.Config{
+			RootCAs:            certPool,
+			Certificates:       []tls.Certificate{cert},
+			InsecureSkipVerify: false,
+		}
+		con, err := tls.Dial("tcp", addr, tlsConf)
+		if err != nil {
+			panic(err)
+		}
+		return &tcp.TlsConWrapper{Conn: con}
+	}
+	con, err := net.Dial("tcp", addr)
 	if err != nil {
 		panic(err)
 	}
-	tun := NewTunnelClientNode(con.(*net.TCPConn), ctx, conf)
+	return con.(*net.TCPConn)
+}
+
+func Run(ctx context.Context, conf *config.ClientConf) {
+	ctx = utils.SetLogger(ctx, slog.Default())
+	con := getConnection(conf)
+	tun := NewTunnelClientNode(con, ctx, conf)
 	tun.Run()
 }

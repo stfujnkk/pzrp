@@ -12,6 +12,9 @@ import (
 type ClientConf struct {
 	ServerAddr string `json:"server_addr"`
 	ServerPort int    `json:"server_port"`
+	CertFile   string `json:"cert_file"`
+	KeyFile    string `json:"key_file"`
+	CaCert     string `json:"ca_cert"`
 	Services   map[string]ClientServiceConf
 }
 

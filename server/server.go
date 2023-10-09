@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -19,7 +21,7 @@ type TCPClientNode struct {
 	*tcp.TCPNode
 }
 
-func NewTCPClientNode(conn *net.TCPConn, readCtx, writeCtx context.Context) *TCPClientNode {
+func NewTCPClientNode(conn tcp.DuplexConnection, readCtx, writeCtx context.Context) *TCPClientNode {
 	node := &TCPClientNode{
 		TCPNode: tcp.NewTCPNode(conn, readCtx, writeCtx, true),
 	}
@@ -50,7 +52,7 @@ type tcpClientInfo struct {
 	writeCtx    context.Context
 }
 
-func newClientInfo(con *net.TCPConn, ctx context.Context) *tcpClientInfo {
+func newClientInfo(con tcp.DuplexConnection, ctx context.Context) *tcpClientInfo {
 	info := &tcpClientInfo{}
 	info.readCtx, info.readCancel = context.WithCancel(ctx)
 	info.writeCtx, info.writeCancel = context.WithCancel(ctx)
@@ -212,7 +214,7 @@ func (node *TCPServerNode) startAccept() {
 	}
 }
 
-func (node *TCPServerNode) registerConnection(con *net.TCPConn) *tcpClientInfo {
+func (node *TCPServerNode) registerConnection(con tcp.DuplexConnection) *tcpClientInfo {
 	node.lock.Lock()
 	defer func() {
 		node.lock.Unlock()
@@ -279,6 +281,43 @@ func (node *TCPServerNode) closeServer() {
 
 var _ proto.Node = &TCPServerNode{}
 
+func getListener(conf *config.ServerConf) net.Listener {
+	addr := fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort)
+	if conf.CertFile != "" && conf.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(conf.CertFile, conf.KeyFile)
+		if err != nil {
+			panic(err)
+		}
+		var certPool *x509.CertPool = nil
+		if conf.CaCert != "" {
+			certBytes, err := os.ReadFile(conf.CaCert)
+			if err != nil {
+				panic(err)
+			}
+			certPool = x509.NewCertPool()
+			ok := certPool.AppendCertsFromPEM(certBytes)
+			if !ok {
+				panic(certPool)
+			}
+		}
+		tlsConf := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    certPool,
+		}
+		lis, err := tls.Listen("tcp", addr, tlsConf)
+		if err != nil {
+			panic(err)
+		}
+		return tcp.TlsListenerWrapper{Listener: lis}
+	}
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		panic(err)
+	}
+	return lis
+}
+
 func Run(ctx context.Context, conf *config.ServerConf) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
@@ -296,10 +335,7 @@ func Run(ctx context.Context, conf *config.ServerConf) {
 
 	baseCtx := utils.SetLogger(ctx, slog.Default())
 	baseLogger := utils.GetLogger(baseCtx)
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort))
-	if err != nil {
-		panic(err)
-	}
+	lis := getListener(conf)
 	go func() {
 		<-ctx.Done()
 		lis.Close()
@@ -313,7 +349,7 @@ func Run(ctx context.Context, conf *config.ServerConf) {
 		logger := baseLogger.With("client_addr", con.RemoteAddr())
 		logger.Info("new client")
 		subCtx := utils.SetLogger(ctx, logger)
-		tun := NewTunnelNode(con.(*net.TCPConn), subCtx)
+		tun := NewTunnelNode(con.(tcp.DuplexConnection), subCtx)
 		go tun.Run()
 	}
 }

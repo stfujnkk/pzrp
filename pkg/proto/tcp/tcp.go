@@ -2,14 +2,24 @@ package tcp
 
 import (
 	"context"
+	"crypto/tls"
+	"io"
 	"net"
 	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/utils"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
+
+type DuplexConnection interface {
+	net.Conn
+	CloseRead() error
+	CloseWrite() error
+}
 
 type TCPNode struct {
 	*tcpNode
@@ -17,15 +27,21 @@ type TCPNode struct {
 
 var _ proto.Node = &TCPNode{}
 
-func NewTCPNode(conn *net.TCPConn, readCtx, writeCtx context.Context, isWait bool) *TCPNode {
-	// conn.SetKeepAlive()
-	// conn.SetKeepAlivePeriod()
-	raddr := conn.RemoteAddr().(*net.TCPAddr)
-	laddr := conn.LocalAddr().(*net.TCPAddr)
+func NewTCPNode(conn DuplexConnection, readCtx, writeCtx context.Context, isWait bool) *TCPNode {
+	raddr := strings.Split(conn.RemoteAddr().String(), ":")
+	rport, err := strconv.Atoi(raddr[1])
+	if err != nil {
+		panic(err)
+	}
+	laddr := strings.Split(conn.LocalAddr().String(), ":")
+	lport, err := strconv.Atoi(laddr[1])
+	if err != nil {
+		panic(err)
+	}
 	node := &tcpNode{
-		ServerPort: uint16(laddr.Port),
-		RemoteHost: raddr.IP.String(),
-		RemotePort: uint16(raddr.Port),
+		ServerPort: uint16(lport),
+		RemoteHost: raddr[0],
+		RemotePort: uint16(rport),
 		inch:       make(chan proto.Msg),
 		ouch:       make(chan proto.Msg),
 		done:       make(chan struct{}),
@@ -55,7 +71,7 @@ type tcpNode struct {
 	done           chan struct{}
 	closed         uint8
 	lock           *sync.Mutex
-	conn           *net.TCPConn
+	conn           DuplexConnection
 	Pack           func(msg *proto.Msg, data []byte) (int, error)
 	UnPack         func(msg proto.Msg) ([]byte, error)
 	readCtx        context.Context
@@ -236,4 +252,33 @@ func (node *tcpNode) closeWrite() {
 	} else {
 		node.conn.CloseWrite()
 	}
+}
+
+type TlsConWrapper struct {
+	*tls.Conn
+	readClosed bool
+}
+
+func (con *TlsConWrapper) Read(b []byte) (int, error) {
+	if con.readClosed {
+		return 0, io.EOF
+	}
+	return con.Conn.Read(b)
+}
+
+func (con *TlsConWrapper) CloseRead() error {
+	con.readClosed = true
+	return nil
+}
+
+type TlsListenerWrapper struct {
+	net.Listener
+}
+
+func (lis TlsListenerWrapper) Accept() (net.Conn, error) {
+	con, err := lis.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &TlsConWrapper{Conn: con.(*tls.Conn)}, nil
 }

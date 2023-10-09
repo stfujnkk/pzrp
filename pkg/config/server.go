@@ -8,6 +8,9 @@ import (
 type ServerConf struct {
 	BindAddr string `json:"bind_addr"`
 	BindPort int    `json:"bind_port"`
+	CertFile string `json:"cert_file"`
+	KeyFile  string `json:"key_file"`
+	CaCert   string `json:"ca_cert"`
 }
 
 func LoadServerConfig(configPath string) (*ServerConf, error) {
