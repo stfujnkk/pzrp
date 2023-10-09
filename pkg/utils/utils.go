@@ -8,19 +8,21 @@ import (
 	"math/rand"
 	"net"
 	"pzrp/pkg/proto"
+	"time"
 )
 
-func TCPipe() (*net.TCPConn, *net.TCPConn) {
-	port := rand.Intn(30000) + 10000
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	listener, err := net.Listen("tcp", addr)
+func TCPipe(port1 int, port2 int, delay time.Duration) (*net.TCPConn, *net.TCPConn) {
+	addr1 := fmt.Sprintf("127.0.0.1:%d", port1)
+	addr2 := fmt.Sprintf("127.0.0.1:%d", port2)
+	listener, err := net.Listen("tcp", addr1)
 	if err != nil {
 		fmt.Printf("listen fail, err: %v\n", err)
 		return nil, nil
 	}
 	ch := make(chan net.Conn)
 	go (func(ch chan<- net.Conn) {
-		conn2, err := net.Dial("tcp", addr)
+		time.Sleep(delay)
+		conn2, err := net.Dial("tcp", addr2)
 		if err != nil {
 			fmt.Printf("dial fail, err: %v\n", err)
 			ch <- nil

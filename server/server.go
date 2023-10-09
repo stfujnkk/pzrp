@@ -279,8 +279,8 @@ func (node *TCPServerNode) closeServer() {
 
 var _ proto.Node = &TCPServerNode{}
 
-func Run() {
-	ctx, cancel := context.WithCancel(context.Background())
+func Run(ctx context.Context, conf *config.ServerConf) {
+	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 	}()
@@ -293,10 +293,7 @@ func Run() {
 		case <-ctx.Done():
 		}
 	}()
-	conf, err := config.LoadServerConfig()
-	if err != nil {
-		panic(err)
-	}
+
 	baseCtx := utils.SetLogger(ctx, slog.Default())
 	baseLogger := utils.GetLogger(baseCtx)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort))

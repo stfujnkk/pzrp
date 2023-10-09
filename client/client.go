@@ -360,16 +360,12 @@ func (node *ProxyTCPNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return msg.Data, nil
 }
 
-func Run() {
-	conf, err := config.LoadClientConfig()
-	if err != nil {
-		panic(err)
-	}
+func Run(ctx context.Context, conf *config.ClientConf) {
+	ctx = utils.SetLogger(ctx, slog.Default())
 	con, err := net.Dial("tcp", fmt.Sprintf("%s:%d", conf.ServerAddr, conf.ServerPort))
 	if err != nil {
 		panic(err)
 	}
-	ctx := utils.SetLogger(context.Background(), slog.Default())
 	tun := NewTunnelClientNode(con.(*net.TCPConn), ctx, conf)
 	tun.Run()
 }

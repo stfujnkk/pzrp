@@ -119,9 +119,9 @@ func RegisterService(conf *ClientConf, register func(uint8, uint16, uint16)) {
 	}
 }
 
-func LoadClientConfig() (*ClientConf, error) {
+func LoadClientConfig(configPath string) (*ClientConf, error) {
 	var conf ClientConf
-	jsonStr, err := os.ReadFile("c.json")
+	jsonStr, err := os.ReadFile(configPath)
 	if err != nil {
 		panic(err)
 	}

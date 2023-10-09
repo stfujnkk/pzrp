@@ -10,9 +10,9 @@ type ServerConf struct {
 	BindPort int    `json:"bind_port"`
 }
 
-func LoadServerConfig() (*ServerConf, error) {
+func LoadServerConfig(configPath string) (*ServerConf, error) {
 	var conf ServerConf
-	jsonStr, err := os.ReadFile("s.json")
+	jsonStr, err := os.ReadFile(configPath)
 	if err != nil {
 		panic(err)
 	}
