@@ -12,9 +12,14 @@ const (
 	PROTO_UDP = uint8(iota)
 )
 
-var ProtoNameMap = map[string]uint8{
+var StrToProto = map[string]uint8{
 	"tcp": PROTO_TCP,
 	"udp": PROTO_UDP,
+}
+
+var ProtoToStr = map[uint8]string{
+	PROTO_TCP: "tcp",
+	PROTO_UDP: "udp",
 }
 
 // 指令

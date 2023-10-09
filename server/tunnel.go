@@ -8,6 +8,7 @@ import (
 	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
+	"pzrp/pkg/utils"
 )
 
 type TunnelNode struct {
@@ -39,10 +40,66 @@ func (node *TunnelNode) AddServer(protocol uint8, port uint16) {
 	services[port] = nil
 }
 
+func (node *TunnelNode) findServer(protocol uint8, serverPort uint16) proto.Node {
+	s1, ok := node.services[protocol]
+	if !ok {
+		return nil
+	}
+	s2, ok := s1[serverPort]
+	if !ok {
+		return nil
+	}
+	return s2
+}
+
+func (node *TunnelNode) dispatchMsg() {
+	logger := utils.GetLogger(node.ctx)
+	defer func() {
+		e := recover()
+		if e != nil {
+			logger.Error("dispatch message failed", "error", e)
+		}
+		node.cancel()
+	}()
+	for {
+		msg, err := node.Read()
+		if err != nil {
+			panic(err)
+		}
+		nextNode := node.findServer(msg.Protocol, msg.ServerPort)
+		err = nextNode.Write(msg)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (node *TunnelNode) collectMsg(server proto.Node) {
+	logger := utils.GetLogger(node.ctx)
+	defer func() {
+		e := recover()
+		if e != nil {
+			logger.Error("collect message failed", "error", e)
+		}
+		node.cancel()
+	}()
+	for {
+		msg, err := server.Read()
+		if err != nil {
+			panic(err)
+		}
+		err = node.Write(msg)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 func (node *TunnelNode) initServer() {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		if e := recover(); e != nil {
-			fmt.Println(e)
+			logger.Error("failed to initialize service", "error", e)
 			node.cancel()
 		}
 	}()
@@ -59,16 +116,17 @@ func (node *TunnelNode) initServer() {
 	}
 	conf := config.ClientConf{}
 	json.Unmarshal(data, &conf)
-	addServer := func(protocol uint8, port uint16, _ uint16) {
-		node.AddServer(protocol, port)
-	}
-	config.RegisterService(&conf, addServer)
+	config.RegisterService(&conf,
+		func(protocol uint8, port uint16, _ uint16) {
+			node.AddServer(protocol, port)
+		},
+	)
 	for k, v := range node.services {
 		switch k {
 		case proto.PROTO_TCP:
 			for port := range v {
 				v[port] = node.startTCPServer(port)
-				node.connectNode(v[port])
+				go node.collectMsg(v[port])
 			}
 		case proto.PROTO_UDP:
 			panic(fmt.Errorf("unimplemented protocol:%v", k))
@@ -76,17 +134,20 @@ func (node *TunnelNode) initServer() {
 			panic(fmt.Errorf("unknown protocol:%v", k))
 		}
 	}
+	logger.Info("service startup completed")
 }
 
 func (node *TunnelNode) Run() {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Println(e)
+			logger.Error("tunnel abnormal exit", "error", e)
 		}
 		node.cancel()
 	}()
 	go node.initServer()
+	go node.dispatchMsg()
 	node.TCPNode.Run()
 }
 
@@ -99,37 +160,12 @@ func (node *TunnelNode) startTCPServer(port uint16) proto.Node {
 	if err != nil {
 		panic(err)
 	}
-	srv := NewTCPServerNode(lis, node.ctx)
+	baseLogger := utils.GetLogger(node.ctx)
+	logger := baseLogger.With("protocol", "tcp", "server_port", port)
+	ctx := utils.SetLogger(node.ctx, logger)
+	srv := NewTCPServerNode(lis, ctx)
 	go srv.Run() // TODO 运行失败后重启
 	return srv
-}
-
-func (node *TunnelNode) connectNode(nextNode proto.Node) {
-	go func() {
-		for {
-			msg, err := nextNode.Read()
-			if err != nil {
-				break
-			}
-			// node.inch <- msg
-			err = node.Write(msg)
-			if err != nil {
-				break
-			}
-		}
-	}()
-	go func() {
-		for {
-			msg, err := node.Read()
-			if err != nil {
-				break
-			}
-			err = nextNode.Write(msg)
-			if err != nil {
-				break
-			}
-		}
-	}()
 }
 
 func (node *TunnelNode) SetReadCtx(ctx context.Context) {

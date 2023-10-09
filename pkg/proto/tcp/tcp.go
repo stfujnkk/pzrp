@@ -2,7 +2,6 @@ package tcp
 
 import (
 	"context"
-	"fmt"
 	"net"
 	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
@@ -79,7 +78,6 @@ func (node *tcpNode) Run() {
 	go node.startRead()
 	go node.startWrite()
 	<-node.Done()
-	fmt.Printf("关闭节点%v\n", *node)
 }
 
 func (node *tcpNode) Write(msg proto.Msg) (err error) {

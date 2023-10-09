@@ -1,10 +1,13 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net"
+	"pzrp/pkg/proto"
 )
 
 func TCPipe() (*net.TCPConn, *net.TCPConn) {
@@ -71,4 +74,28 @@ func NewErr(e any) error {
 		return errors.New(errMsg)
 	}
 	return fmt.Errorf("%T : %+v", e, e)
+}
+
+// log
+
+type key string
+
+const (
+	logKey key = "logger"
+)
+
+func GetLogger(ctx context.Context) *slog.Logger {
+	return ctx.Value(logKey).(*slog.Logger)
+}
+
+func SetLogger(ctx context.Context, log *slog.Logger) context.Context {
+	if log == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, logKey, log)
+}
+
+func GetLoggerWithMsg(ctx context.Context, msg proto.Msg) *slog.Logger {
+	logger := GetLogger(ctx)
+	return logger.With("remote_ip", msg.RemoteIP, "remote_port", msg.RemotePort, "protocol", proto.ProtoToStr[msg.Protocol])
 }

@@ -24,7 +24,7 @@ type ClientServiceConf struct {
 
 func (conf ClientServiceConf) GetProtocol() uint8 {
 	protoName := strings.ToLower(conf.Type)
-	p, ok := proto.ProtoNameMap[protoName]
+	p, ok := proto.StrToProto[protoName]
 	if ok {
 		return p
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
+	"pzrp/pkg/utils"
 	"sync"
 )
 
@@ -84,10 +86,11 @@ func NewTCPServerNode(listener *net.TCPListener, ctx context.Context) *TCPServer
 }
 
 func (node *TCPServerNode) Run() {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Printf("tcp服务运行错误：%v\n", e)
+			logger.Error("abnormal service exit", "error", e)
 		}
 		node.cancel()
 	}()
@@ -100,10 +103,11 @@ func (node *TCPServerNode) Run() {
 }
 
 func (node *TCPServerNode) startDispatch() {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Printf("推送消息错误：%v\n", e)
+			logger.Error("push message failed", "error", e)
 		}
 		node.cancel()
 	}()
@@ -113,11 +117,17 @@ func (node *TCPServerNode) startDispatch() {
 }
 
 func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
+	node.lock.Lock()
+	defer func() {
+		node.lock.Unlock()
+	}()
+
+	logger := utils.GetLoggerWithMsg(node.ctx, msg)
 	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
 	info, ok := node.clientInfoMap[raddr]
 	defer func() {
 		if e := recover(); e != nil {
-			fmt.Printf("写入%v错误：%v\n", msg, e)
+			logger.Warn("write error", "error", e)
 			node.notifyClose(msg.RemoteIP.String(), msg.RemotePort, proto.ACTION_CLOSE_WRITE)
 			if info != nil && info.readCancel != nil {
 				info.writeCancel()
@@ -130,14 +140,16 @@ func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
 		}
 		if (msg.Action & proto.ACTION_CLOSE_READ) != 0 {
 			info.writeCancel()
+			logger.Info("write off")
 		}
 		if (msg.Action & proto.ACTION_CLOSE_WRITE) != 0 {
 			info.readCancel()
+			logger.Info("read off")
 		}
 		return
 	} else {
 		if !ok {
-			panic(fmt.Sprintf("找不到 %s", raddr))
+			panic(fmt.Sprintf("address not found: %s", raddr))
 		}
 		err := info.node.Write(msg)
 		if err != nil {
@@ -147,9 +159,10 @@ func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
 }
 
 func (node *TCPServerNode) notifyClose(ip string, port uint16, action uint8) {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		if e := recover(); e != nil {
-			fmt.Printf("通知关闭时出错：%v\n", e)
+			logger.Error("notification close failed", "error", e)
 			node.cancel()
 		}
 	}()
@@ -164,12 +177,12 @@ func (node *TCPServerNode) notifyClose(ip string, port uint16, action uint8) {
 	}
 }
 
-func (node *TCPServerNode) collectFromClient(clientInfo *tcpClientInfo) {
+func (node *TCPServerNode) collectFromClient(clientInfo *tcpClientInfo, logger *slog.Logger) {
 	clientNode := clientInfo.node
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Printf("读取%v错误：%v\n", clientNode, e)
+			logger.Warn("failed to read data", "error", e)
 		}
 		node.notifyClose(clientNode.RemoteHost, clientNode.RemotePort, proto.ACTION_CLOSE_READ)
 		if clientInfo != nil && clientInfo.readCancel != nil {
@@ -186,14 +199,16 @@ func (node *TCPServerNode) collectFromClient(clientInfo *tcpClientInfo) {
 }
 
 func (node *TCPServerNode) startAccept() {
+	baseLogger := utils.GetLogger(node.ctx)
 	for {
 		con, err := node.listener.AcceptTCP()
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("新连接%v\n", con)
+		logger := baseLogger.With("remote_addr", con.RemoteAddr())
+		logger.Info("accept new connections")
 		info := node.registerConnection(con)
-		go node.collectFromClient(info)
+		go node.collectFromClient(info, logger)
 	}
 }
 
@@ -270,31 +285,38 @@ func Run() {
 		cancel()
 	}()
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan)
+	signal.Notify(sigChan, os.Interrupt)
 	go func() {
 		select {
-		case sig := <-sigChan:
-			fmt.Printf("用户强制退出：%v\n", sig)
+		case <-sigChan:
 			cancel()
 		case <-ctx.Done():
 		}
 	}()
-
 	conf, err := config.LoadServerConfig()
 	if err != nil {
 		panic(err)
 	}
-
+	baseCtx := utils.SetLogger(ctx, slog.Default())
+	baseLogger := utils.GetLogger(baseCtx)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", conf.BindAddr, conf.BindPort))
 	if err != nil {
 		panic(err)
 	}
+	go func() {
+		<-ctx.Done()
+		lis.Close()
+	}()
+	baseLogger.Info("successfully started service", "bind_addr", conf.BindAddr, "bind_port", conf.BindPort)
 	for {
 		con, err := lis.Accept()
 		if err != nil {
 			panic(err)
 		}
-		tun := NewTunnelNode(con.(*net.TCPConn), ctx)
+		logger := baseLogger.With("client_addr", con.RemoteAddr())
+		logger.Info("new client")
+		subCtx := utils.SetLogger(ctx, logger)
+		tun := NewTunnelNode(con.(*net.TCPConn), subCtx)
 		go tun.Run()
 	}
 }

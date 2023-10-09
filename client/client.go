@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
+	"pzrp/pkg/utils"
 	"sync"
 )
 
@@ -22,7 +24,7 @@ type clientNodeInfo struct {
 
 type TunnelClientNode struct {
 	*tcp.TCPNode
-	serviceMapping map[uint8]map[uint16]uint16 // 远程端口-->本地端口
+	serviceMapping map[uint8]map[uint16]uint16 // Remote Port-->Local Port
 	clients        map[uint8]map[uint16]map[string]*clientNodeInfo
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -67,7 +69,7 @@ func (node *TunnelClientNode) AddServer(protocol uint8, rPort uint16, lPort uint
 	}
 	_, ok = services[rPort]
 	if ok {
-		panic(fmt.Sprintf("重复分配端口:%d", rPort))
+		panic(fmt.Sprintf("duplicate binding port: %d", rPort))
 	}
 	services[rPort] = lPort
 }
@@ -81,6 +83,7 @@ func (node *TunnelClientNode) Run() {
 }
 
 func (node *TunnelClientNode) pushConfig() {
+	logger := utils.GetLogger(node.ctx)
 	config.RegisterService(node.conf, node.AddServer)
 	data, err := json.Marshal(node.conf)
 	if err != nil {
@@ -103,13 +106,15 @@ func (node *TunnelClientNode) pushConfig() {
 			break
 		}
 	}
+	logger.Info("successfully connected")
 }
 
 func (node *TunnelClientNode) startDispatch() {
+	logger := utils.GetLogger(node.ctx)
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Printf("read tunnel error: %v\n", e)
+			logger.Error("read tunnel fail", "error", e)
 		}
 		node.cancel()
 	}()
@@ -124,10 +129,11 @@ func (node *TunnelClientNode) startDispatch() {
 }
 
 func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
+	logger := utils.GetLoggerWithMsg(node.ctx, msg)
 	info, err := node.findClientNode(msg)
 	defer func() {
 		if e := recover(); e != nil {
-			fmt.Printf("推送消息错误：%v\n", e)
+			logger.Warn("push message failed", "error", e)
 			msg.Data = []byte{}
 			msg.Action = proto.ACTION_CLOSE_WRITE
 			node.Write(msg)
@@ -138,13 +144,15 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 	}()
 	if proto.IsCloseMsg(msg) {
 		if err != nil {
-			fmt.Println(err)
+			logger.Warn("connection does not exist")
 		} else {
 			if (msg.Action & proto.ACTION_CLOSE_READ) != 0 {
 				info.writeCancel()
+				logger.Warn("write off")
 			}
 			if (msg.Action & proto.ACTION_CLOSE_WRITE) != 0 {
 				info.readCancel()
+				logger.Warn("read off")
 			}
 		}
 	} else {
@@ -162,25 +170,26 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 func (node *TunnelClientNode) findClientNode(msg proto.Msg) (*clientNodeInfo, error) {
 	_, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
 	if !ok {
-		return nil, fmt.Errorf("不存在对应的本地服务")
+		return nil, fmt.Errorf("no corresponding local service exists")
 	}
 	c1, ok := node.clients[msg.Protocol]
 	if !ok {
-		return nil, errors.New("找不到对应客户端")
+		return nil, errors.New("unable to find corresponding client")
 	}
 	c2, ok := c1[msg.ServerPort]
 	if !ok {
-		return nil, errors.New("找不到对应客户端")
+		return nil, errors.New("unable to find corresponding client")
 	}
 	addr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
 	info, ok := c2[addr]
 	if !ok {
-		return nil, errors.New("找不到对应客户端")
+		return nil, errors.New("unable to find corresponding client")
 	}
 	return info, nil
 }
 
 func (node *TunnelClientNode) startConnect(msg proto.Msg) {
+	logger := utils.GetLoggerWithMsg(node.ctx, msg)
 	node.lock.Lock()
 	defer func() {
 		node.lock.Unlock()
@@ -188,7 +197,7 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 	info, err := node.findClientNode(msg)
 	defer func() {
 		if e := recover(); e != nil {
-			fmt.Printf("连接本地服务失败：%v\n", e)
+			logger.Error("connection to local service failed", "error", e)
 			msg.Data = []byte{}
 			msg.Action = proto.ACTION_CLOSE_ALL
 			node.Write(msg)
@@ -203,7 +212,7 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 		}
 	}()
 	if err != nil {
-		// 找不到时创建一个新的
+		logger.Info("start connecting")
 		switch msg.Protocol {
 		case proto.PROTO_TCP:
 			info = node.connectTCP(msg)
@@ -214,32 +223,30 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 		}
 	}
 	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
-	var (
-		// 防止msg不gc
-		serverPort = msg.ServerPort
-		protocol   = msg.Protocol
-	)
-	node.registerConnection(protocol, serverPort, raddr, info)
-	go func() {
+	node.registerConnection(msg.Protocol, msg.ServerPort, raddr, info)
+	go func(protocol uint8, serverPort uint16) {
 		info.node.Run()
 		node.removeConnection(protocol, serverPort, raddr)
-	}()
-	go node.collectMsgFromNode(info, protocol, serverPort, msg.RemoteIP, msg.RemotePort)
+	}(msg.Protocol, msg.ServerPort)
+	go node.collectMsgFromNode(info, msg.Protocol, msg.ServerPort, msg.RemoteIP, msg.RemotePort, logger)
 	e := info.node.Write(msg)
 	if e != nil {
 		panic(e)
 	}
 }
 
-func (node *TunnelClientNode) collectMsgFromNode(info *clientNodeInfo, protocol uint8, sPort uint16, rIP net.IP, rPort uint16) {
+func (node *TunnelClientNode) collectMsgFromNode(info *clientNodeInfo,
+	protocol uint8, sPort uint16, rIP net.IP,
+	rPort uint16, logger *slog.Logger,
+) {
 	defer func() {
 		e := recover()
 		if e != nil {
-			fmt.Printf("读取%v失败：%v\n", info, e)
+			logger.Warn("read failure", "error", e)
 		}
-		// 防止未关闭
+		// prevent not closing
 		info.readCancel()
-		// 通知远端关闭
+		// notify remote shutdown
 		node.Write(proto.Msg{
 			RemoteIP:   rIP,
 			RemotePort: rPort,
@@ -256,7 +263,6 @@ func (node *TunnelClientNode) collectMsgFromNode(info *clientNodeInfo, protocol 
 		}
 		err = node.Write(msg)
 		if err != nil {
-			// node.cancel()
 			panic(err)
 		}
 	}
@@ -295,7 +301,7 @@ func (node *TunnelClientNode) removeConnection(protocol uint8, serverPort uint16
 func (node *TunnelClientNode) connectTCP(msg proto.Msg) *clientNodeInfo {
 	localPort, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
 	if !ok {
-		panic(fmt.Errorf("不存在对应的本地服务"))
+		panic(fmt.Errorf("no corresponding local service exists"))
 	}
 	serverAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
@@ -363,7 +369,7 @@ func Run() {
 	if err != nil {
 		panic(err)
 	}
-	ctx := context.Background()
+	ctx := utils.SetLogger(context.Background(), slog.Default())
 	tun := NewTunnelClientNode(con.(*net.TCPConn), ctx, conf)
 	tun.Run()
 }
