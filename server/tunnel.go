@@ -8,6 +8,7 @@ import (
 	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
+	"pzrp/pkg/proto/udp"
 	"pzrp/pkg/utils"
 )
 
@@ -129,7 +130,10 @@ func (node *TunnelNode) initServer() {
 				go node.collectMsg(v[port])
 			}
 		case proto.PROTO_UDP:
-			panic(fmt.Errorf("unimplemented protocol:%v", k))
+			for port := range v {
+				v[port] = node.startUDPServer(port)
+				go node.collectMsg(v[port])
+			}
 		default:
 			panic(fmt.Errorf("unknown protocol:%v", k))
 		}
@@ -165,6 +169,19 @@ func (node *TunnelNode) startTCPServer(port uint16) proto.Node {
 	ctx := utils.SetLogger(node.ctx, logger)
 	srv := NewTCPServerNode(lis, ctx)
 	go srv.Run() // TODO 运行失败后重启
+	return srv
+}
+
+func (node *TunnelNode) startUDPServer(port uint16) proto.Node {
+	server, err := net.ListenUDP("udp", &net.UDPAddr{
+		IP:   net.IPv4(0, 0, 0, 0),
+		Port: int(port),
+	})
+	if err != nil {
+		panic(err)
+	}
+	srv := udp.NewUdpServerNode(server, port, node.ctx)
+	go srv.Run()
 	return srv
 }
 

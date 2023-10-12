@@ -13,6 +13,7 @@ import (
 	"pzrp/pkg/config"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
+	"pzrp/pkg/proto/udp"
 	"pzrp/pkg/utils"
 	"sync"
 )
@@ -220,7 +221,7 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 		case proto.PROTO_TCP:
 			info = node.connectTCP(msg)
 		case proto.PROTO_UDP:
-			panic(fmt.Errorf("unimplemented protocol:%v", msg.Protocol))
+			info = node.connectUDP(msg)
 		default:
 			panic(fmt.Errorf("unknown protocol:%v", msg.Protocol))
 		}
@@ -299,6 +300,29 @@ func (node *TunnelClientNode) removeConnection(protocol uint8, serverPort uint16
 		return
 	}
 	delete(c2, remoteAddr)
+}
+
+func (node *TunnelClientNode) connectUDP(msg proto.Msg) *clientNodeInfo {
+	localPort, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
+	if !ok {
+		panic(fmt.Errorf("no corresponding local service exists"))
+	}
+	con, err := net.DialUDP("udp", nil, &net.UDPAddr{
+		IP:   net.ParseIP("127.0.0.1"),
+		Port: int(localPort),
+	})
+	if err != nil {
+		panic(err)
+	}
+	info := &clientNodeInfo{}
+	info.readCtx, info.readCancel = context.WithCancel(node.ctx)
+	info.writeCtx, info.writeCancel = info.readCtx, info.readCancel
+	info.node = udp.NewUdpClientNode(
+		con, msg.ServerPort,
+		msg.RemoteIP, msg.RemotePort,
+		info.readCtx,
+	)
+	return info
 }
 
 func (node *TunnelClientNode) connectTCP(msg proto.Msg) *clientNodeInfo {
