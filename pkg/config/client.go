@@ -96,7 +96,7 @@ func (pra PortRange) GetIter() func() int {
 	}
 }
 
-func RegisterService(conf *ClientConf, register func(uint8, uint16, uint16)) {
+func RegisterService(conf *ClientConf, register func(uint8, uint16, string, uint16)) {
 	for _, srv := range conf.Services {
 		rp, err := NewPortRange(srv.RemotePort)
 		if err != nil {
@@ -107,7 +107,7 @@ func RegisterService(conf *ClientConf, register func(uint8, uint16, uint16)) {
 			panic(err)
 		}
 		if lp.Len != rp.Len {
-			panic("端口个数不对应")
+			panic("The number of ports does not correspond")
 		}
 		rit := rp.GetIter()
 		lit := lp.GetIter()
@@ -117,7 +117,7 @@ func RegisterService(conf *ClientConf, register func(uint8, uint16, uint16)) {
 			if rport < 0 {
 				break
 			}
-			register(srv.GetProtocol(), uint16(rport), uint16(lport))
+			register(srv.GetProtocol(), uint16(rport), srv.LocalIP, uint16(lport))
 		}
 	}
 }

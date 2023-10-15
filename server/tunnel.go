@@ -70,7 +70,7 @@ func (node *TunnelNode) dispatchMsg() {
 		nextNode := node.findServer(msg.Protocol, msg.ServerPort)
 		err = nextNode.Write(msg)
 		if err != nil {
-			panic(err)
+			logger.Error("dispatch message failed", "error", err, "node", nextNode)
 		}
 	}
 }
@@ -118,7 +118,7 @@ func (node *TunnelNode) initServer() {
 	conf := config.ClientConf{}
 	json.Unmarshal(data, &conf)
 	config.RegisterService(&conf,
-		func(protocol uint8, port uint16, _ uint16) {
+		func(protocol uint8, port uint16, _ string, _ uint16) {
 			node.AddServer(protocol, port)
 		},
 	)

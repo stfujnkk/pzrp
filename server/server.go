@@ -341,6 +341,11 @@ func Run(ctx context.Context, conf *config.ServerConf) {
 		lis.Close()
 	}()
 	baseLogger.Info("successfully started service", "bind_addr", conf.BindAddr, "bind_port", conf.BindPort)
+	defer func() {
+		if e := recover(); e != nil {
+			baseLogger.Error("service exit", "error", e)
+		}
+	}()
 	for {
 		con, err := lis.Accept()
 		if err != nil {

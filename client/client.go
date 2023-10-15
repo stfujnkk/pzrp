@@ -63,13 +63,13 @@ func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *c
 	return node
 }
 
-func (node *TunnelClientNode) AddServer(protocol uint8, rPort uint16, lPort uint16) {
+func (node *TunnelClientNode) AddServer(protocol uint8, rPort uint16, lIP string, lPort uint16) {
 	k := fmt.Sprintf("%d:%d", protocol, rPort)
 	_, ok := node.serviceMapping.Load(k)
 	if ok {
 		panic(fmt.Sprintf("duplicate binding port: %d", rPort))
 	}
-	node.serviceMapping.Store(k, lPort)
+	node.serviceMapping.Store(k, fmt.Sprintf("%s:%d", lIP, lPort))
 }
 
 func (node *TunnelClientNode) Run() {
@@ -181,7 +181,7 @@ func (node *TunnelClientNode) findClientNode(msg proto.Msg) (*clientNodeInfo, er
 
 func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 	logger := utils.GetLoggerWithMsg(node.ctx, msg)
-	info, err := node.findClientNode(msg)
+	var info *clientNodeInfo = nil
 	defer func() {
 		if e := recover(); e != nil {
 			logger.Error("connection to local service failed", "error", e)
@@ -198,25 +198,25 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 			}
 		}
 	}()
-	if err != nil {
-		// TODO Do not block the distribution process
-		logger.Info("start connecting")
-		switch msg.Protocol {
-		case proto.PROTO_TCP:
-			info = node.connectTCP(msg)
-		case proto.PROTO_UDP:
-			info = node.connectUDP(msg)
-		default:
-			panic(fmt.Errorf("unknown protocol:%v", msg.Protocol))
-		}
-		raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
-		node.registerConnection(msg.Protocol, msg.ServerPort, raddr, info)
-		go func(protocol uint8, serverPort uint16) {
-			info.node.Run()
-			node.removeConnection(protocol, serverPort, raddr)
-		}(msg.Protocol, msg.ServerPort)
-		go node.collectMsgFromNode(info, msg.Protocol, msg.ServerPort, msg.RemoteIP, msg.RemotePort, logger)
+
+	// TODO Do not block the distribution process
+	logger.Info("start connecting")
+	switch msg.Protocol {
+	case proto.PROTO_TCP:
+		info = node.connectTCP(msg)
+	case proto.PROTO_UDP:
+		info = node.connectUDP(msg)
+	default:
+		panic(fmt.Errorf("unknown protocol:%v", msg.Protocol))
 	}
+	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
+	node.registerConnection(msg.Protocol, msg.ServerPort, raddr, info)
+	go func(protocol uint8, serverPort uint16) {
+		info.node.Run()
+		node.removeConnection(protocol, serverPort, raddr)
+	}(msg.Protocol, msg.ServerPort)
+	go node.collectMsgFromNode(info, msg.Protocol, msg.ServerPort, msg.RemoteIP, msg.RemotePort, logger)
+
 	e := info.node.Write(msg)
 	if e != nil {
 		panic(e)
@@ -271,14 +271,15 @@ func (node *TunnelClientNode) removeConnection(protocol uint8, serverPort uint16
 
 func (node *TunnelClientNode) connectUDP(msg proto.Msg) *clientNodeInfo {
 	k := fmt.Sprintf("%d:%d", msg.Protocol, msg.ServerPort)
-	localPort, ok := node.serviceMapping.Load(k)
+	localAddr, ok := node.serviceMapping.Load(k)
 	if !ok {
 		panic(fmt.Errorf("no corresponding local service exists"))
 	}
-	con, err := net.DialUDP("udp", nil, &net.UDPAddr{
-		IP:   net.ParseIP("127.0.0.1"),
-		Port: int(localPort.(uint16)),
-	})
+	laddr, err := net.ResolveUDPAddr("udp", localAddr.(string))
+	if err != nil {
+		panic(err)
+	}
+	con, err := net.DialUDP("udp", nil, laddr)
 	if err != nil {
 		panic(err)
 	}
@@ -295,11 +296,11 @@ func (node *TunnelClientNode) connectUDP(msg proto.Msg) *clientNodeInfo {
 
 func (node *TunnelClientNode) connectTCP(msg proto.Msg) *clientNodeInfo {
 	k := fmt.Sprintf("%d:%d", msg.Protocol, msg.ServerPort)
-	localPort, ok := node.serviceMapping.Load(k)
+	localAddr, ok := node.serviceMapping.Load(k)
 	if !ok {
 		panic(fmt.Errorf("no corresponding local service exists"))
 	}
-	serverAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	serverAddr, err := net.ResolveTCPAddr("tcp", localAddr.(string))
 	if err != nil {
 		panic(err)
 	}

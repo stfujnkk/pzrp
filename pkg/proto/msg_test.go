@@ -35,7 +35,7 @@ func TestMsg(t *testing.T) {
 		Action:     2,
 		Protocol:   3,
 		ServerPort: 8848,
-		Data:       []byte("你好"),
+		Data:       []byte("Hello"),
 	}
 	p := m1.ToPacket()
 	// test 1
