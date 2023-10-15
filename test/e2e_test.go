@@ -21,6 +21,12 @@ func loadConfig() (*config.ServerConf, *config.ClientConf) {
 				"local_ip": "127.0.0.1",
 				"local_port": "8100-8105",
 				"remote_port": "9200-9205"
+			},
+			"s2": {
+				"type": "udp",
+				"local_ip": "127.0.0.1",
+				"local_port": "8500,8600,8700",
+				"remote_port": "9500,9600,9700"
 			}
 		}
 	}`
@@ -141,4 +147,52 @@ func TestTCP(t *testing.T) {
 	if n != 0 {
 		t.Fatal("not closing normally")
 	}
+}
+
+func TestUDP(t *testing.T) {
+	conf1, conf2 := loadConfig()
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer func() {
+		cancel1()
+		cancel2()
+	}()
+
+	go func() {
+		server.Run(ctx1, conf1)
+	}()
+	go func() {
+		client.Run(ctx2, conf2)
+	}()
+	buf := make([]byte, 1024)
+	con1, con2 := utils.UDPipe(8500, 9500, 100*time.Millisecond)
+
+	msg1 := "Hello!"
+	_, err := con2.Write([]byte(msg1))
+	if err != nil {
+		t.Fatalf("udp write error: %v", err)
+	}
+
+	n, addr, err := con1.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("udp read error: %v", err)
+	}
+	if msg1 != string(buf[:n]) {
+		t.Fatalf("inconsistent data: expect %v, but got %v", msg1, string(buf[:n]))
+	}
+
+	msg2 := "Hi~"
+	_, err = con1.WriteTo([]byte(msg2), addr)
+	if err != nil {
+		t.Fatalf("udp write error: %v", err)
+	}
+
+	n, err = con2.Read(buf)
+	if err != nil {
+		t.Fatalf("udp read error: %v", err)
+	}
+	if msg2 != string(buf[:n]) {
+		t.Fatalf("inconsistent data: expect %v, but got %v", msg2, string(buf[:n]))
+	}
+
 }

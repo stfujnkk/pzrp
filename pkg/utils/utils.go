@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net"
 	"pzrp/pkg/proto"
 	"time"
@@ -39,22 +38,22 @@ func TCPipe(port1 int, port2 int, delay time.Duration) (*net.TCPConn, *net.TCPCo
 	return conn1.(*net.TCPConn), conn2.(*net.TCPConn)
 }
 
-func UDPipe() (*net.UDPConn, *net.UDPConn) {
-	port := rand.Intn(30000) + 10000
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	udpAddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		fmt.Printf("can't resolve address, err:%v\n", err)
-		return nil, nil
-	}
-	conn1, err := net.ListenUDP("udp", udpAddr)
+func UDPipe(port1 int, port2 int, delay time.Duration) (*net.UDPConn, *net.UDPConn) {
+	conn1, err := net.ListenUDP("udp", &net.UDPAddr{
+		IP:   net.ParseIP("127.0.0.1"),
+		Port: port1,
+	})
 	if err != nil {
 		fmt.Printf("read from connect failed, err:%v\n", err)
 		return nil, nil
 	}
 	ch := make(chan *net.UDPConn)
 	go (func(ch chan<- *net.UDPConn) {
-		conn2, err := net.DialUDP("udp", nil, udpAddr)
+		time.Sleep(delay)
+		conn2, err := net.DialUDP("udp", nil, &net.UDPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: port2,
+		})
 		if err != nil {
 			fmt.Printf("DialUDP failed, err:%v\n", err)
 			ch <- nil
