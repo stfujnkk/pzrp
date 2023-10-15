@@ -1,4 +1,4 @@
-@echo off
+@REM @echo off
 
 if "%~1" == "" goto end1
 set ip=127.0.0.1
@@ -14,7 +14,7 @@ echo basicConstraints=CA:FALSE > %extfile%
 echo keyUsage=nonRepudiation, digitalSignature, keyEncipherment >> %extfile%
 echo subjectAltName=DNS.1:localhost, IP.1:%ip% >> %extfile%
 openssl x509 -req -days 365 -sha256 -extfile %extfile% -CA ca/certs/ca.crt -CAkey ca/keys/ca.key -in %1/certs/%1.csr -out %1/certs/%1.crt -CAcreateserial
-copy ca/certs/ca.crt %1/ca.crt
+copy /y "ca\certs\ca.crt" "%1\ca.crt"
 goto:eof
 
 :end1
