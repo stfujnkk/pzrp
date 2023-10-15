@@ -139,6 +139,7 @@ func (node *TunnelNode) initServer() {
 		}
 	}
 	logger.Info("service startup completed")
+	node.dispatchMsg()
 }
 
 func (node *TunnelNode) Run() {
@@ -151,7 +152,6 @@ func (node *TunnelNode) Run() {
 		node.cancel()
 	}()
 	go node.initServer()
-	go node.dispatchMsg()
 	node.TCPNode.Run()
 }
 

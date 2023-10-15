@@ -28,11 +28,10 @@ type clientNodeInfo struct {
 
 type TunnelClientNode struct {
 	*tcp.TCPNode
-	serviceMapping map[uint8]map[uint16]uint16 // Remote Port-->Local Port
-	clients        map[uint8]map[uint16]map[string]*clientNodeInfo
+	serviceMapping sync.Map // Remote Port-->Local Port
+	clients        sync.Map
 	ctx            context.Context
 	cancel         context.CancelFunc
-	lock           *sync.Mutex
 	conf           *config.ClientConf
 }
 
@@ -55,9 +54,8 @@ func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *c
 		TCPNode:        tcp.NewTCPNode(conn, _ctx, _ctx, false),
 		cancel:         _cancel,
 		ctx:            _ctx,
-		serviceMapping: map[uint8]map[uint16]uint16{},
-		clients:        map[uint8]map[uint16]map[string]*clientNodeInfo{},
-		lock:           new(sync.Mutex),
+		serviceMapping: sync.Map{},
+		clients:        sync.Map{},
 		conf:           conf,
 	}
 	node.Pack = node.overridePack
@@ -66,16 +64,12 @@ func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *c
 }
 
 func (node *TunnelClientNode) AddServer(protocol uint8, rPort uint16, lPort uint16) {
-	services, ok := node.serviceMapping[protocol]
-	if !ok {
-		services = map[uint16]uint16{}
-		node.serviceMapping[protocol] = services
-	}
-	_, ok = services[rPort]
+	k := fmt.Sprintf("%d:%d", protocol, rPort)
+	_, ok := node.serviceMapping.Load(k)
 	if ok {
 		panic(fmt.Sprintf("duplicate binding port: %d", rPort))
 	}
-	services[rPort] = lPort
+	node.serviceMapping.Store(k, lPort)
 }
 
 func (node *TunnelClientNode) Run() {
@@ -172,32 +166,21 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 }
 
 func (node *TunnelClientNode) findClientNode(msg proto.Msg) (*clientNodeInfo, error) {
-	_, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
+	k := fmt.Sprintf("%d:%d", msg.Protocol, msg.ServerPort)
+	_, ok := node.serviceMapping.Load(k)
 	if !ok {
 		return nil, fmt.Errorf("no corresponding local service exists")
 	}
-	c1, ok := node.clients[msg.Protocol]
+	k1 := fmt.Sprintf("%s:%s:%d", k, msg.RemoteIP.String(), msg.RemotePort)
+	info, ok := node.clients.Load(k1)
 	if !ok {
 		return nil, errors.New("unable to find corresponding client")
 	}
-	c2, ok := c1[msg.ServerPort]
-	if !ok {
-		return nil, errors.New("unable to find corresponding client")
-	}
-	addr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
-	info, ok := c2[addr]
-	if !ok {
-		return nil, errors.New("unable to find corresponding client")
-	}
-	return info, nil
+	return info.(*clientNodeInfo), nil
 }
 
 func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 	logger := utils.GetLoggerWithMsg(node.ctx, msg)
-	node.lock.Lock()
-	defer func() {
-		node.lock.Unlock()
-	}()
 	info, err := node.findClientNode(msg)
 	defer func() {
 		if e := recover(); e != nil {
@@ -216,6 +199,7 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 		}
 	}()
 	if err != nil {
+		// TODO Do not block the distribution process
 		logger.Info("start connecting")
 		switch msg.Protocol {
 		case proto.PROTO_TCP:
@@ -225,14 +209,14 @@ func (node *TunnelClientNode) startConnect(msg proto.Msg) {
 		default:
 			panic(fmt.Errorf("unknown protocol:%v", msg.Protocol))
 		}
+		raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
+		node.registerConnection(msg.Protocol, msg.ServerPort, raddr, info)
+		go func(protocol uint8, serverPort uint16) {
+			info.node.Run()
+			node.removeConnection(protocol, serverPort, raddr)
+		}(msg.Protocol, msg.ServerPort)
+		go node.collectMsgFromNode(info, msg.Protocol, msg.ServerPort, msg.RemoteIP, msg.RemotePort, logger)
 	}
-	raddr := fmt.Sprintf("%s:%d", msg.RemoteIP.String(), msg.RemotePort)
-	node.registerConnection(msg.Protocol, msg.ServerPort, raddr, info)
-	go func(protocol uint8, serverPort uint16) {
-		info.node.Run()
-		node.removeConnection(protocol, serverPort, raddr)
-	}(msg.Protocol, msg.ServerPort)
-	go node.collectMsgFromNode(info, msg.Protocol, msg.ServerPort, msg.RemoteIP, msg.RemotePort, logger)
 	e := info.node.Write(msg)
 	if e != nil {
 		panic(e)
@@ -273,43 +257,27 @@ func (node *TunnelClientNode) collectMsgFromNode(info *clientNodeInfo,
 }
 
 func (node *TunnelClientNode) registerConnection(protocol uint8, serverPort uint16, remoteAddr string, info *clientNodeInfo) {
-	c1, ok := node.clients[protocol]
-	if !ok {
-		c1 = map[uint16]map[string]*clientNodeInfo{}
-		node.clients[protocol] = c1
-	}
-	c2, ok := c1[serverPort]
-	if !ok {
-		c2 = map[string]*clientNodeInfo{}
-		c1[serverPort] = c2
-	}
-	c2[remoteAddr] = info
+	k := fmt.Sprintf("%d:%d:%s", protocol, serverPort, remoteAddr)
+	node.clients.Store(k, info)
 }
 
 func (node *TunnelClientNode) removeConnection(protocol uint8, serverPort uint16, remoteAddr string) {
-	node.lock.Lock()
-	defer func() {
-		node.lock.Unlock()
-	}()
-	c1, ok := node.clients[protocol]
-	if !ok {
-		return
+	k := fmt.Sprintf("%d:%d:%s", protocol, serverPort, remoteAddr)
+	_, ok := node.clients.Load(k)
+	if ok {
+		node.clients.Delete(k)
 	}
-	c2, ok := c1[serverPort]
-	if !ok {
-		return
-	}
-	delete(c2, remoteAddr)
 }
 
 func (node *TunnelClientNode) connectUDP(msg proto.Msg) *clientNodeInfo {
-	localPort, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
+	k := fmt.Sprintf("%d:%d", msg.Protocol, msg.ServerPort)
+	localPort, ok := node.serviceMapping.Load(k)
 	if !ok {
 		panic(fmt.Errorf("no corresponding local service exists"))
 	}
 	con, err := net.DialUDP("udp", nil, &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
-		Port: int(localPort),
+		Port: int(localPort.(uint16)),
 	})
 	if err != nil {
 		panic(err)
@@ -326,7 +294,8 @@ func (node *TunnelClientNode) connectUDP(msg proto.Msg) *clientNodeInfo {
 }
 
 func (node *TunnelClientNode) connectTCP(msg proto.Msg) *clientNodeInfo {
-	localPort, ok := node.serviceMapping[msg.Protocol][msg.ServerPort]
+	k := fmt.Sprintf("%d:%d", msg.Protocol, msg.ServerPort)
+	localPort, ok := node.serviceMapping.Load(k)
 	if !ok {
 		panic(fmt.Errorf("no corresponding local service exists"))
 	}
