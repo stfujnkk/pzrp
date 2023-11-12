@@ -1,10 +1,11 @@
 # pzrp
 [README](README.md) | [中文文档](README_zh.md)
 
-A lightweight reverse proxy to help you expose a local server behind a NAT or firewall to the internet.
-## Compile
+一个轻量的反向代理，可以帮助您将NAT或防火墙后面的本地服务器暴露在互联网上。
 
-Execute the following command
+## 编译
+
+执行如下命令
 
 - windows
 
@@ -18,11 +19,11 @@ Execute the following command
   ./build.sh
   ```
 
-## Get started!
+## 开始使用！
 
-- Writing Configuration Files
+- 编写配置文件
 
-  client configuration (pzrpc.json)
+  客户端配置（pzrpc.json）
 
   ```json
   {
@@ -45,7 +46,7 @@ Execute the following command
   }
   ```
 
-  Server Configuration (pzrps.json)
+  服务端配置（pzrps.json）
   ```json
   {
     "bind_addr": "0.0.0.0",
@@ -53,25 +54,23 @@ Execute the following command
   }
   ```
 
-- Run
+- 运行
 
-  Start the server using the following command: `./pzrps -config ./pzrps.json`。
+  使用以下命令启动服务器：`./pzrps -config ./pzrps.json`。
 
-  Start the client using the following command:`./pzrpc -config ./pzrpc.json`。
+  使用以下命令启动客户端：`./pzrpc -config ./pzrpc.json`。
 
-  If you need to run in the background for a long time, it is recommended to combine other tools, such as `systemd` or `supervisor`。
+  如果需要在后台长期运行，建议结合其他工具，如 `systemd` 或 `supervisor`。
 
-  If you are a Windows user, you need to execute the same command from the cmd.
+  如果您是 Windows 用户，需要在命令提示符中执行相同的命令。
 
 
-## Secure
+## 安全
 
-You can specify a certificate in the configuration file for encryption. Certificates can be generated through openssl or using scripts in the tools folder.
+你可以在配置文件里指定证书来进行加密。证书可以通过openssl生成或使用tools文件夹里的脚本生成。
 
-The `ca_cert` field specifies the path of the CA certificate.
-The `cert_file`,`key_file` field specifies the certificate and key paths respectively.
+其中`ca_cert`指定CA证书的路径。`cert_file`、`key_file`分别指定证书和密钥路径。
 
-  client configuration (pzrpc.json)
   ```json
   {
     "server_addr": "127.0.0.1",
@@ -96,7 +95,7 @@ The `cert_file`,`key_file` field specifies the certificate and key paths respect
   }
   ```
 
-  Server Configuration (pzrps.json)
+  服务端配置（pzrps.json）
   ```json
   {
     "bind_addr": "0.0.0.0",
@@ -106,6 +105,7 @@ The `cert_file`,`key_file` field specifies the certificate and key paths respect
     "ca_cert": "ca/certs/ca.crt"
   }
   ```
-## Performance
 
-At a rate of 1000 requests per second, a throughput of 10964 can be achieved. Please refer to the [stress test report](stress_test.zip) for specific data
+## 性能
+
+在每秒1000个请求的情况下,可以达到10964的吞吐量。具体数据参考[压力测试报告](stress_test.zip)

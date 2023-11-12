@@ -244,6 +244,7 @@ func (node *TunnelClientNode) collectMsgFromNode(info *clientNodeInfo,
 			Data:       []byte{},
 		})
 	}()
+	// Use io.Copy instead ?
 	for {
 		msg, err := info.node.Read()
 		if err != nil {
