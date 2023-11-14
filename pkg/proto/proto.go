@@ -1,7 +1,10 @@
 package proto
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"net"
 )
 
@@ -29,6 +32,7 @@ const (
 	ACTION_CLOSE_WRITE = uint8(iota)
 	ACTION_CLOSE_ALL   = ACTION_CLOSE_READ | ACTION_CLOSE_WRITE
 	ACTION_SET_CONFIG  = uint8(iota)
+	ACTION_AUTH        = uint8(iota)
 )
 
 type Node interface {
@@ -60,4 +64,20 @@ type PacketHead struct {
 	Action     uint8
 	Protocol   uint8
 	ServerPort uint16
+}
+
+func Auth(key []byte, msg []byte, sig []byte) bool {
+	l := len(msg) - 32
+	if l <= 0 {
+		return false
+	}
+	hmac := hmac.New(sha256.New, key)
+	hmac.Write(msg)
+	return bytes.Equal(hmac.Sum([]byte{}), sig)
+}
+
+func Sign(key []byte, msg []byte) []byte {
+	hmac := hmac.New(sha256.New, key)
+	hmac.Write(msg)
+	return hmac.Sum([]byte{})
 }

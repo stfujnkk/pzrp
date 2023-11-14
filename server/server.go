@@ -333,6 +333,8 @@ func Run(ctx context.Context, conf *config.ServerConf) {
 		}
 	}()
 
+	key := []byte(conf.Token)
+	conf.Token = ""
 	baseCtx := utils.SetLogger(ctx, slog.Default())
 	baseLogger := utils.GetLogger(baseCtx)
 	lis := getListener(conf)
@@ -354,7 +356,7 @@ func Run(ctx context.Context, conf *config.ServerConf) {
 		logger := baseLogger.With("client_addr", con.RemoteAddr())
 		logger.Info("new client")
 		subCtx := utils.SetLogger(ctx, logger)
-		tun := NewTunnelNode(con.(tcp.DuplexConnection), subCtx)
+		tun := NewTunnelNode(con.(tcp.DuplexConnection), subCtx, key)
 		go tun.Run()
 	}
 }
