@@ -129,7 +129,7 @@ func (node *TunnelNode) sendAuthRequest() {
 		panic(err)
 	}
 	if authMsg.Action != proto.ACTION_AUTH {
-		panic(pkgErr.ErrAuth)
+		panic(pkgErr.ErrAbnormalPacket)
 	}
 	if !proto.Auth(node.key, msg, authMsg.Data) {
 		panic(pkgErr.ErrAuth)

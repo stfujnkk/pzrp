@@ -120,7 +120,7 @@ func (node *TunnelClientNode) sendAuthResponse() {
 		panic(err)
 	}
 	if authMsg.Action != proto.ACTION_AUTH {
-		panic(pkgErr.ErrAuth)
+		panic(pkgErr.ErrAbnormalPacket)
 	}
 	authMsg.Data = proto.Sign(node.key, authMsg.Data)
 	err = node.Write(authMsg)
@@ -177,6 +177,9 @@ func (node *TunnelClientNode) dispatchMsg(msg proto.Msg) {
 			}
 		}
 	} else {
+		if msg.Action != proto.ACTION_SEND_DATA {
+			panic(pkgErr.ErrAbnormalPacket)
+		}
 		if err != nil {
 			node.startConnect(msg)
 		} else {

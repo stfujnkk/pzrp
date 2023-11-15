@@ -150,6 +150,9 @@ func (node *TCPServerNode) dispatchMsg(msg proto.Msg) {
 		}
 		return
 	} else {
+		if msg.Action != proto.ACTION_SEND_DATA {
+			panic(pkgErr.ErrAbnormalPacket)
+		}
 		if !ok {
 			panic(fmt.Sprintf("address not found: %s", raddr))
 		}
