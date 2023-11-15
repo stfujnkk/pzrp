@@ -11,6 +11,7 @@ type ServerConf struct {
 	CertFile string `json:"cert_file"`
 	KeyFile  string `json:"key_file"`
 	CaCert   string `json:"ca_cert"`
+	Token    string `json:"token"`
 }
 
 func LoadServerConfig(configPath string) (*ServerConf, error) {

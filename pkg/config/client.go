@@ -16,6 +16,7 @@ type ClientConf struct {
 	KeyFile    string `json:"key_file"`
 	CaCert     string `json:"ca_cert"`
 	Services   map[string]ClientServiceConf
+	Token  string `json:"token"`
 }
 
 type ClientServiceConf struct {

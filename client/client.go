@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"pzrp/pkg/config"
+	pkgErr "pzrp/pkg/errors"
 	"pzrp/pkg/proto"
 	"pzrp/pkg/proto/tcp"
 	"pzrp/pkg/proto/udp"
@@ -33,6 +34,7 @@ type TunnelClientNode struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	conf           *config.ClientConf
+	key            []byte
 }
 
 func (node *TunnelClientNode) overridePack(msg *proto.Msg, data []byte) (int, error) {
@@ -48,7 +50,7 @@ func (node *TunnelClientNode) overrideUnPack(msg proto.Msg) ([]byte, error) {
 	return data, err
 }
 
-func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *config.ClientConf) *TunnelClientNode {
+func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *config.ClientConf, key []byte) *TunnelClientNode {
 	_ctx, _cancel := context.WithCancel(ctx)
 	node := &TunnelClientNode{
 		TCPNode:        tcp.NewTCPNode(conn, _ctx, _ctx, false),
@@ -57,6 +59,7 @@ func NewTunnelClientNode(conn tcp.DuplexConnection, ctx context.Context, conf *c
 		serviceMapping: sync.Map{},
 		clients:        sync.Map{},
 		conf:           conf,
+		key:            key,
 	}
 	node.Pack = node.overridePack
 	node.UnPack = node.overrideUnPack
@@ -81,6 +84,7 @@ func (node *TunnelClientNode) Run() {
 }
 
 func (node *TunnelClientNode) pushConfig() {
+	node.conf.Token = ""
 	logger := utils.GetLogger(node.ctx)
 	config.RegisterService(node.conf, node.AddServer)
 	data, err := json.Marshal(node.conf)
@@ -107,6 +111,24 @@ func (node *TunnelClientNode) pushConfig() {
 	logger.Info("successfully connected")
 }
 
+func (node *TunnelClientNode) sendAuthResponse() {
+	if node.key == nil || len(node.key) == 0 {
+		return
+	}
+	authMsg, err := node.Read()
+	if err != nil {
+		panic(err)
+	}
+	if authMsg.Action != proto.ACTION_AUTH {
+		panic(pkgErr.ErrAuth)
+	}
+	authMsg.Data = proto.Sign(node.key, authMsg.Data)
+	err = node.Write(authMsg)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func (node *TunnelClientNode) startDispatch() {
 	logger := utils.GetLogger(node.ctx)
 	defer func() {
@@ -116,6 +138,7 @@ func (node *TunnelClientNode) startDispatch() {
 		}
 		node.cancel()
 	}()
+	node.sendAuthResponse()
 	node.pushConfig()
 	for {
 		msg, err := node.Read()
@@ -396,8 +419,10 @@ func getConnection(conf *config.ClientConf) tcp.DuplexConnection {
 }
 
 func Run(ctx context.Context, conf *config.ClientConf) {
+	key := []byte(conf.Token)
+	conf.Token = ""
 	ctx = utils.SetLogger(ctx, slog.Default())
 	con := getConnection(conf)
-	tun := NewTunnelClientNode(con, ctx, conf)
+	tun := NewTunnelClientNode(con, ctx, conf, key)
 	tun.Run()
 }
