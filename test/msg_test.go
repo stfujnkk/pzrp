@@ -1,12 +1,13 @@
-package proto
+package test
 
 import (
 	"bytes"
 	"net"
+	"pzrp/pkg/proto"
 	"testing"
 )
 
-func MsgIsEqual(a, b *Msg) bool {
+func MsgIsEqual(a, b *proto.Msg) bool {
 	if !net.IP.Equal(a.RemoteIP, b.RemoteIP) {
 		return false
 	}
@@ -29,7 +30,7 @@ func MsgIsEqual(a, b *Msg) bool {
 }
 
 func TestMsg(t *testing.T) {
-	m1 := &Msg{
+	m1 := &proto.Msg{
 		RemoteIP:   net.ParseIP("127.0.0.1"),
 		RemotePort: 8080,
 		Action:     2,
@@ -43,7 +44,7 @@ func TestMsg(t *testing.T) {
 	if err != nil {
 		t.Errorf("Msg Encode error: %v", err)
 	}
-	p, _, err = NewPacket(b)
+	p, _, err = proto.NewPacket(b)
 	if err != nil {
 		t.Errorf("Msg Decode error: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestMsg(t *testing.T) {
 	// test 2
 	b1 := []byte{0}
 	b2 := append(b, b1...)
-	p, l, err := NewPacket(b2)
+	p, l, err := proto.NewPacket(b2)
 	if err != nil {
 		t.Errorf("Msg Decode error: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestMsg(t *testing.T) {
 	}
 	// test 3
 	b3 := b[:l-1]
-	_, l, err = NewPacket(b3)
+	_, l, err = proto.NewPacket(b3)
 	if !(l == 0 && err == nil) {
 		t.Error("Incomplete data should not be parsed")
 	}
