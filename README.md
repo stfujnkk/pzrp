@@ -22,7 +22,7 @@ Execute the following command
 
 - Writing Configuration Files
 
-  client configuration (pzrpc.json)
+  Client configuration (pzrpc.json)
 
   ```json
   {
@@ -71,7 +71,7 @@ You can specify a certificate in the configuration file for encryption. Certific
 The `ca_cert` field specifies the path of the CA certificate.
 The `cert_file`,`key_file` field specifies the certificate and key paths respectively.
 
-  client configuration (pzrpc.json)
+  Client configuration (pzrpc.json)
   ```json
   {
     "server_addr": "127.0.0.1",
@@ -108,4 +108,12 @@ The `cert_file`,`key_file` field specifies the certificate and key paths respect
   ```
 ## Performance
 
-At a rate of 1000 requests per second, a throughput of 10964 can be achieved. Please refer to the [stress test report](stress_test.zip) for specific data
+At a rate of 1000 requests per second, a throughput of 10964 can be achieved. Please refer to the [stress test report](stress_test.zip) for specific data.
+
+The test results of the server with a delay of about 25ms are as follows:
+```txt
+udp (direct) mean: 23.9206, median: 23.895, variance: 1.4923329696969698, max: 27.44, min: 21.53
+udp (pzrp) mean: 48.2616, median: 48.21, variance: 1.9760782222222222, max: 53.93, min: 45.65
+tcp (direct) mean: 24.3326, median: 24.25, variance: 1.8366537777777778, max: 27.5, min: 21.9
+tcp (pzrp) mean: 48.7418, median: 48.675, variance: 1.6446633939393935, max: 51.54, min: 45.87
+```
