@@ -71,41 +71,52 @@ You can specify a certificate in the configuration file for encryption. Certific
 The `ca_cert` field specifies the path of the CA certificate.
 The `cert_file`,`key_file` field specifies the certificate and key paths respectively.
 
-  Client configuration (pzrpc.json)
-  ```json
-  {
-    "server_addr": "127.0.0.1",
-    "server_port": 8848,
-    "services": {
-      "s0": {
-        "type": "udp",
-        "local_ip": "127.0.0.1",
-        "local_port": "8200-8205",
-        "remote_port": "9200-9205"
-      },
-      "s1": {
-        "type": "tcp",
-        "local_ip": "127.0.0.1",
-        "local_port": "8888",
-        "remote_port": "8000"
-      }
+Client configuration (pzrpc.json)
+```json
+{
+  "server_addr": "127.0.0.1",
+  "server_port": 8848,
+  "services": {
+    "s0": {
+      "type": "udp",
+      "local_ip": "127.0.0.1",
+      "local_port": "8200-8205",
+      "remote_port": "9200-9205"
     },
-    "cert_file": "client/certs/client.crt",
-    "key_file": "client/keys/client.key",
-    "ca_cert": "ca/certs/ca.crt"
-  }
-  ```
+    "s1": {
+      "type": "tcp",
+      "local_ip": "127.0.0.1",
+      "local_port": "8888",
+      "remote_port": "8000"
+    }
+  },
+  "cert_file": "client/certs/client.crt",
+  "key_file": "client/keys/client.key",
+  "ca_cert": "ca/certs/ca.crt"
+}
+```
 
-  Server Configuration (pzrps.json)
-  ```json
-  {
-    "bind_addr": "0.0.0.0",
-    "bind_port": 8848,
-    "cert_file": "server/certs/server.crt",
-    "key_file": "server/keys/server.key",
-    "ca_cert": "ca/certs/ca.crt"
-  }
-  ```
+Server Configuration (pzrps.json)
+```json
+{
+  "bind_addr": "0.0.0.0",
+  "bind_port": 8848,
+  "cert_file": "server/certs/server.crt",
+  "key_file": "server/keys/server.key",
+  "ca_cert": "ca/certs/ca.crt"
+}
+```
+
+Additionally, simple authentication can be denied by setting a token. Just add the token field to `pzrps.json`. The same goes for `pzrpc.json`.
+
+```json
+{
+  "bind_addr": "0.0.0.0",
+  "bind_port": 8848,
+  "token": "你的密码"
+}
+```
+
 ## Performance
 
 At a rate of 1000 requests per second, a throughput of 10964 can be achieved. Please refer to the [stress test report](stress_test.zip) for specific data.
