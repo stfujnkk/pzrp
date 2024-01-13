@@ -113,7 +113,7 @@ Additionally, simple authentication can be denied by setting a token. Just add t
 {
   "bind_addr": "0.0.0.0",
   "bind_port": 8848,
-  "token": "你的密码"
+  "token": "Your password"
 }
 ```
 
