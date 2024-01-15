@@ -99,7 +99,7 @@ func (node *tcpNode) Run() {
 func (node *tcpNode) Write(msg proto.Msg) (err error) {
 	defer (func() {
 		if e := recover(); e != nil {
-			err = node.writeCtx.Err()
+			err = context.Cause(node.writeCtx)
 			if err == nil {
 				err = utils.NewErr(e)
 			}
@@ -116,7 +116,7 @@ func (node *tcpNode) Read() (proto.Msg, error) {
 	msg, ok := <-node.ouch
 	var err error = nil
 	if !ok {
-		err = node.readCtx.Err()
+		err = context.Cause(node.readCtx)
 		if err == nil {
 			err = pkgErr.ErrClosed
 		}
