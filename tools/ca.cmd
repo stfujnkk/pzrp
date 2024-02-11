@@ -1,6 +1,6 @@
 @echo off
 
-rmdir /Q/S ca>nul 2>nul
+rmdir /S ca
 md ca\keys
 md ca\certs
 openssl genrsa -out ca/keys/ca.key 4096

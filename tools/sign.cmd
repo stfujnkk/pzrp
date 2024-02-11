@@ -4,7 +4,7 @@ if "%~1" == "" goto end1
 set ip=127.0.0.1
 if "%~2" neq "" set ip=%~2
 
-rmdir /Q/S %1>nul 2>nul
+rmdir /S %1
 md %1\keys
 md %1\certs
 openssl genrsa -out %1/keys/%1.key 2048
